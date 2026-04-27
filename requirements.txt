@@ -1,5 +1,4 @@
 pandas==2.2.3
 numpy==1.26.4
-yfinance==0.2.54
 requests==2.32.3
 python-binance==1.0.19
