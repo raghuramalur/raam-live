@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAAM // LIVE COMMAND CENTRE</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #020408;
+    --bg2:      #060d14;
+    --panel:    #09131e;
+    --border:   #0d2d3f;
+    --green:    #00ff88;
+    --cyan:     #00e5ff;
+    --amber:    #ffb300;
+    --red:      #ff3860;
+    --dim:      #1a4a5e;
+    --text:     #8ecfdf;
+    --text-dim: #2a6070;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  /* Scanlines overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+  }
+
+  /* CRT flicker */
+  @keyframes flicker {
+    0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:.97} 94%{opacity:1} 96%{opacity:.98}
+  }
+  body { animation: flicker 8s infinite; }
+
+  /* Grid background */
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .wrap {
+    position: relative; z-index: 1;
+    max-width: 1400px; margin: 0 auto;
+    padding: 20px 16px;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px; margin-bottom: 24px;
+  }
+
+  .logo {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px; font-weight: 900;
+    color: var(--cyan);
+    text-shadow: 0 0 20px rgba(0,229,255,.6), 0 0 60px rgba(0,229,255,.2);
+    letter-spacing: 4px;
+  }
+  .logo span { color: var(--green); }
+
+  .header-right { text-align: right; color: var(--text-dim); font-size: 11px; }
+  .header-right .mode-badge {
+    display: inline-block; padding: 3px 10px;
+    border: 1px solid var(--amber); color: var(--amber);
+    font-family: 'Orbitron', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 2px; margin-bottom: 6px;
+  }
+  .header-right .mode-badge.live { border-color: var(--green); color: var(--green); }
+
+  /* ── BIG NUMBERS ROW ── */
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin-bottom: 20px;
+  }
+
+  @media(max-width:800px){ .metrics-row { grid-template-columns: repeat(2,1fr); } }
+
+  .metric-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--cyan);
+    padding: 18px 20px;
+    position: relative; overflow: hidden;
+  }
+  .metric-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    animation: scanline 3s linear infinite;
+  }
+  @keyframes scanline { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+
+  .metric-card:nth-child(2) { border-top-color: var(--green); }
+  .metric-card:nth-child(2)::before { background: linear-gradient(90deg,transparent,var(--green),transparent); animation-delay:.5s }
+  .metric-card:nth-child(3) { border-top-color: var(--amber); }
+  .metric-card:nth-child(3)::before { background: linear-gradient(90deg,transparent,var(--amber),transparent); animation-delay:1s }
+  .metric-card:nth-child(4) { border-top-color: #b060ff; }
+  .metric-card:nth-child(4)::before { background: linear-gradient(90deg,transparent,#b060ff,transparent); animation-delay:1.5s }
+
+  .metric-label {
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 8px;
+  }
+  .metric-value {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 26px; font-weight: 700; color: var(--cyan);
+    line-height: 1;
+  }
+  .metric-card:nth-child(2) .metric-value { color: var(--green); }
+  .metric-card:nth-child(3) .metric-value { color: var(--amber); }
+  .metric-card:nth-child(4) .metric-value { color: #b060ff; }
+  .metric-value.positive { color: var(--green) !important; }
+  .metric-value.negative { color: var(--red) !important; }
+  .metric-sub { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
+  /* ── MID ROW ── */
+  .mid-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px; margin-bottom: 20px;
+  }
+  @media(max-width:700px){ .mid-row { grid-template-columns: 1fr; } }
+
+  /* ── PANELS ── */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 0;
+  }
+  .panel-header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px; font-weight: 700; letter-spacing: 3px;
+    color: var(--cyan); text-transform: uppercase;
+  }
+  .panel-body { padding: 14px 16px; }
+
+  /* ── ALLOCATION BARS ── */
+  .alloc-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px;
+  }
+  .alloc-name { width: 130px; color: var(--cyan); font-size: 12px; flex-shrink: 0; }
+  .alloc-bar-track {
+    flex: 1; height: 10px;
+    background: var(--dim);
+    position: relative; overflow: hidden;
+  }
+  .alloc-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--cyan), var(--green));
+    box-shadow: 0 0 8px var(--cyan);
+    transition: width 1s ease;
+  }
+  .alloc-bar-fill.cash {
+    background: linear-gradient(90deg, var(--text-dim), var(--dim));
+    box-shadow: none;
+  }
+  .alloc-pct { width: 44px; text-align: right; color: var(--amber); font-size: 12px; }
+
+  /* ── BREADTH GAUGE ── */
+  .breadth-wrap {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 10px 0;
+  }
+  .breadth-label { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); margin-bottom: 14px; }
+  .breadth-dots {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+    margin-bottom: 14px;
+  }
+  .dot {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--dim);
+    border: 1px solid var(--text-dim);
+  }
+  .dot.active {
+    background: var(--green);
+    box-shadow: 0 0 10px var(--green), 0 0 20px rgba(0,255,136,.4);
+    border-color: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 10px var(--green),0 0 20px rgba(0,255,136,.4)} 50%{box-shadow:0 0 16px var(--green),0 0 32px rgba(0,255,136,.6)} }
+  .breadth-number {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 40px; font-weight: 900; color: var(--green);
+    text-shadow: 0 0 30px rgba(0,255,136,.5);
+  }
+  .breadth-denom { font-size: 18px; color: var(--text-dim); }
+
+  /* ── POSITIONS TABLE ── */
+  .pos-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .pos-table th {
+    color: var(--text-dim); font-weight: normal;
+    letter-spacing: 1px; text-transform: uppercase; font-size: 10px;
+    padding: 6px 8px; border-bottom: 1px solid var(--border);
+    text-align: right;
+  }
+  .pos-table th:first-child { text-align: left; }
+  .pos-table td {
+    padding: 10px 8px; border-bottom: 1px solid rgba(13,45,63,.5);
+    text-align: right; color: var(--text);
+  }
+  .pos-table td:first-child { text-align: left; color: var(--cyan); }
+  .pos-table tr:last-child td { border-bottom: none; }
+  .pos-table tr:hover td { background: rgba(0,229,255,.04); }
+  .pnl-pos { color: var(--green); }
+  .pnl-neg { color: var(--red); }
+
+  /* ── SIGNAL GRID ── */
+  .signal-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sig-chip {
+    padding: 5px 10px; font-size: 11px;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim); letter-spacing: 1px;
+  }
+  .sig-chip.active {
+    border-color: var(--green); color: var(--green);
+    background: rgba(0,255,136,.07);
+    box-shadow: 0 0 6px rgba(0,255,136,.3);
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border); margin-top: 24px;
+    padding-top: 14px;
+    display: flex; justify-content: space-between;
+    color: var(--text-dim); font-size: 11px;
+  }
+
+  /* ── LOADING STATE ── */
+  #loading {
+    position: fixed; inset: 0;
+    background: var(--bg); z-index: 999;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px;
+  }
+  .boot-text {
+    font-family: 'Orbitron', sans-serif; font-size: 13px;
+    color: var(--cyan); letter-spacing: 3px;
+    animation: blink 1s step-start infinite;
+  }
+  @keyframes blink { 50%{opacity:0} }
+
+  /* ── CORNER DECORATIONS ── */
+  .corner-tl, .corner-tr { position: absolute; width: 12px; height: 12px; }
+  .corner-tl { top: 0; left: 0; border-top: 2px solid var(--cyan); border-left: 2px solid var(--cyan); }
+  .corner-tr { top: 0; right: 0; border-top: 2px solid var(--cyan); border-right: 2px solid var(--cyan); }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div style="font-family:Orbitron;font-size:32px;font-weight:900;color:var(--cyan);text-shadow:0 0 30px rgba(0,229,255,.8);letter-spacing:6px">RAAM</div>
+  <div class="boot-text">INITIALISING SYSTEMS...</div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+
+  <header>
+    <div>
+      <div class="logo">R A A M <span>//</span> LIVE</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px;letter-spacing:2px">RANKED ASSET ALLOCATION MODEL</div>
+    </div>
+    <div class="header-right">
+      <div id="mode-badge" class="mode-badge">● SANDBOX</div>
+      <div id="last-run">LAST RUN: —</div>
+      <div id="next-run" style="margin-top:2px">NEXT RUN: FRIDAY 15:30 IST</div>
+    </div>
+  </header>
+
+  <!-- BIG METRICS -->
+  <div class="metrics-row">
+    <div class="metric-card">
+      <div class="metric-label">◈ Portfolio Value</div>
+      <div class="metric-value" id="m-current">—</div>
+      <div class="metric-sub" id="m-invested">invested: —</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">◈ Unrealised P&amp;L</div>
+      <div class="metric-value" id="m-pnl">—</div>
+      <div class="metric-sub" id="m-pnl-pct">since inception</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">◈ Market Breadth</div>
+      <div class="metric-value" id="m-breadth">—</div>
+      <div class="metric-sub">assets in uptrend</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">◈ Next Rebalance</div>
+      <div class="metric-value" style="font-size:14px;padding-top:6px" id="m-next">—</div>
+      <div class="metric-sub" id="m-countdown"></div>
+    </div>
+  </div>
+
+  <!-- MID ROW -->
+  <div class="mid-row">
+
+    <!-- Allocation -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">⬡ Target Allocation</div>
+        <div style="font-size:10px;color:var(--text-dim)" id="alloc-date"></div>
+      </div>
+      <div class="panel-body" id="alloc-body"></div>
+    </div>
+
+    <!-- Breadth gauge -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">⬡ Signal Matrix Breadth</div>
+        <div style="font-size:10px;color:var(--text-dim)">MAJORITY VOTE</div>
+      </div>
+      <div class="panel-body">
+        <div class="breadth-wrap">
+          <div class="breadth-label">ASSETS IN VERIFIED UPTREND</div>
+          <div class="breadth-dots" id="breadth-dots"></div>
+          <div class="breadth-number">
+            <span id="breadth-n">—</span>
+            <span class="breadth-denom"> / <span id="breadth-max">11</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- POSITIONS TABLE -->
+  <div class="panel" style="margin-bottom:20px">
+    <div class="panel-header">
+      <div class="panel-title">⬡ Open Positions</div>
+      <div style="font-size:10px;color:var(--text-dim)">PAPER TRADING PORTFOLIO</div>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <table class="pos-table">
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Shares</th>
+            <th>Avg Cost</th>
+            <th>Live Price</th>
+            <th>Invested</th>
+            <th>Current</th>
+            <th>Unrealised P&amp;L</th>
+          </tr>
+        </thead>
+        <tbody id="pos-body">
+          <tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">Loading positions...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SIGNAL GRID -->
+  <div class="panel" style="margin-bottom:20px">
+    <div class="panel-header">
+      <div class="panel-title">⬡ Universe Signal Status</div>
+    </div>
+    <div class="panel-body">
+      <div class="signal-grid" id="signal-grid"></div>
+    </div>
+  </div>
+
+  <footer>
+    <div>RAAM // Ranked Asset Allocation Model // 6-Indicator WFO Ensemble</div>
+    <div id="gen-time">GENERATED: —</div>
+  </footer>
+
+</div>
+
+<script>
+const fmt = (n, dec=0) => '₹' + Math.abs(n).toLocaleString('en-IN', {minimumFractionDigits:dec, maximumFractionDigits:dec});
+const fmtPct = n => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+
+function nextFriday() {
+  const now = new Date();
+  const ist = new Date(now.toLocaleString('en-US', {timeZone:'Asia/Kolkata'}));
+  const d = ist.getDay(); // 0=Sun..6=Sat, 5=Fri
+  const daysUntil = d === 5 ? (ist.getHours() >= 15 ? 7 : 0) : (5 - d + 7) % 7 || 7;
+  const next = new Date(ist);
+  next.setDate(ist.getDate() + daysUntil);
+  next.setHours(15, 30, 0, 0);
+  return next;
+}
+
+function countdown() {
+  const now = new Date(new Date().toLocaleString('en-US', {timeZone:'Asia/Kolkata'}));
+  const next = nextFriday();
+  const ms = next - now;
+  if (ms <= 0) return 'EXECUTING NOW';
+  const d = Math.floor(ms/864e5);
+  const h = Math.floor((ms%864e5)/36e5);
+  const m = Math.floor((ms%36e5)/6e4);
+  return (d>0?d+'d ':'')+h+'h '+m+'m';
+}
+
+async function load() {
+  try {
+    const resp = await fetch('dashboard_data.json?_=' + Date.now());
+    const d = await resp.json();
+
+    // Mode badge
+    const badge = document.getElementById('mode-badge');
+    if (d.mode === 'live') { badge.textContent = '● LIVE'; badge.className = 'mode-badge live'; }
+    else badge.textContent = '● SANDBOX';
+
+    document.getElementById('last-run').textContent = 'LAST RUN: ' + d.last_run_date;
+
+    // Big metrics
+    document.getElementById('m-current').textContent = fmt(d.current_value);
+    document.getElementById('m-invested').textContent = 'invested: ' + fmt(d.total_invested);
+
+    const pnlEl = document.getElementById('m-pnl');
+    pnlEl.textContent = (d.net_pnl >= 0 ? '+' : '') + fmt(d.net_pnl);
+    pnlEl.className = 'metric-value ' + (d.net_pnl >= 0 ? 'positive' : 'negative');
+    document.getElementById('m-pnl-pct').textContent = fmtPct(d.net_pnl_pct);
+
+    document.getElementById('m-breadth').textContent = d.breadth + ' / ' + d.breadth_max;
+
+    const nxt = nextFriday();
+    document.getElementById('m-next').textContent = nxt.toLocaleDateString('en-IN',
+      {weekday:'short',day:'numeric',month:'short', timeZone:'Asia/Kolkata'});
+    document.getElementById('m-countdown').textContent = countdown() + ' remaining';
+    setInterval(() => {
+      document.getElementById('m-countdown').textContent = countdown() + ' remaining';
+    }, 60000);
+
+    // Allocation bars
+    const allocBody = document.getElementById('alloc-body');
+    allocBody.innerHTML = '';
+    document.getElementById('alloc-date').textContent = d.last_run_date;
+    Object.entries(d.target_alloc).forEach(([t, pct]) => {
+      const isCash = t === 'LIQUIDBEES.NS';
+      allocBody.innerHTML += `
+        <div class="alloc-row">
+          <div class="alloc-name">${t.replace('.NS','')}</div>
+          <div class="alloc-bar-track">
+            <div class="alloc-bar-fill ${isCash?'cash':''}" style="width:${pct}%"></div>
+          </div>
+          <div class="alloc-pct">${pct}%</div>
+        </div>`;
+    });
+
+    // Breadth dots
+    const dotsEl = document.getElementById('breadth-dots');
+    dotsEl.innerHTML = '';
+    for (let i = 0; i < d.breadth_max; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'dot' + (i < d.breadth ? ' active' : '');
+      dotsEl.appendChild(dot);
+    }
+    document.getElementById('breadth-n').textContent = d.breadth;
+    document.getElementById('breadth-max').textContent = d.breadth_max;
+
+    // Positions table
+    const tbody = document.getElementById('pos-body');
+    if (!d.positions || d.positions.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">No open positions. Portfolio is in cash.</td></tr>';
+    } else {
+      tbody.innerHTML = d.positions.map(p => {
+        const pnlClass = p.pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+        const pnlStr   = (p.pnl >= 0 ? '+' : '') + fmt(p.pnl) + ' (' + fmtPct(p.pnl_pct) + ')';
+        return `<tr>
+          <td>${p.ticker.replace('.NS','')}</td>
+          <td>${typeof p.shares === 'number' && p.shares % 1 !== 0 ? p.shares.toFixed(5) : p.shares}</td>
+          <td>${fmt(p.avg_cost, 2)}</td>
+          <td>${fmt(p.live_price, 2)}</td>
+          <td>${fmt(p.invested)}</td>
+          <td>${fmt(p.current)}</td>
+          <td class="${pnlClass}">${pnlStr}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Signal chips — we show all assets from target_alloc + a few standard ones
+    const sigGrid = document.getElementById('signal-grid');
+    const allAssets = [
+      'MON100','NIFTYBEES','JUNIORBEES','INFRABEES','AUTOBEES',
+      'GOLDBEES','BTC-USD','ITBEES','PHARMABEES','BANKBEES','CPSEETF'
+    ];
+    const activeSet = new Set(
+      Object.keys(d.target_alloc)
+        .filter(k => k !== 'LIQUIDBEES.NS' && (d.target_alloc[k] || 0) > 0)
+        .map(k => k.replace('.NS',''))
+    );
+    sigGrid.innerHTML = allAssets.map(a =>
+      `<div class="sig-chip ${activeSet.has(a)?'active':''}">${a}</div>`
+    ).join('');
+
+    document.getElementById('gen-time').textContent =
+      'GENERATED: ' + new Date(d.generated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) + ' IST';
+
+    // Fade in
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+
+  } catch(e) {
+    document.getElementById('loading').innerHTML =
+      `<div style="font-family:Orbitron;color:var(--red);letter-spacing:3px;font-size:14px">
+        DATA UNAVAILABLE<br>
+        <span style="font-size:11px;color:var(--text-dim);font-family:Share Tech Mono">${e.message}</span>
+      </div>`;
+  }
+}
+
+window.onload = load;
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+name: RAAM Weekly Execution Engine
+
+on:
+  schedule:
+    # Every Friday at 10:00 UTC = 3:30 PM IST
+    - cron: '0 10 * * 5'
+  
+  # Also allow manual trigger from GitHub UI (Actions tab → Run workflow)
+  workflow_dispatch:
+
+jobs:
+  raam_execute:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to commit dashboard_data.json back to repo
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: raam-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run RAAM weekly engine
+        env:
+          UPSTOX_TOKEN:     ${{ secrets.UPSTOX_TOKEN }}
+          PORTFOLIO_VALUE:  ${{ secrets.PORTFOLIO_VALUE }}
+          MODE:             ${{ secrets.MODE }}
+          BINANCE_API_KEY:  ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_SECRET_KEY: ${{ secrets.BINANCE_SECRET_KEY }}
+        run: python raam_runner.py
+
+      - name: Commit updated data back to repo
+        run: |
+          git config user.name  "RAAM Bot"
+          git config user.email "raam-bot@github-actions"
+          git add data/stage_3/trade_log.csv dashboard_data.json
+          git diff --staged --quiet || git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
+          git push
