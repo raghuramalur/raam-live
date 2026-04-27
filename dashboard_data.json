@@ -1,15 +1,52 @@
 {
-  "generated_at": "1970-01-01T00:00:00Z",
+  "generated_at": "2026-04-27T21:06:44.274409Z",
   "mode": "sandbox",
-  "portfolio_value": 60000,
-  "total_invested": 0,
-  "current_value": 0,
-  "net_pnl": 0,
+  "portfolio_value": 60000.0,
+  "total_invested": 59603.0,
+  "current_value": 59603.0,
+  "net_pnl": 0.0,
   "net_pnl_pct": 0.0,
-  "breadth": 0,
+  "breadth": 9,
   "breadth_max": 11,
-  "target_alloc": { "LIQUIDBEES.NS": 100.0 },
-  "positions": [],
-  "next_rebalance": "Next Friday 3:30 PM IST",
-  "last_run_date": "never"
+  "target_alloc": {
+    "MON100.NS": 33.3,
+    "CPSEETF.NS": 33.3,
+    "JUNIORBEES.NS": 33.3,
+    "LIQUIDBEES.NS": 0.0
+  },
+  "positions": [
+    {
+      "ticker": "MON100.NS",
+      "shares": 67.0,
+      "avg_cost": 295.1,
+      "live_price": 295.1,
+      "invested": 19772.0,
+      "current": 19772.0,
+      "pnl": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "ticker": "CPSEETF.NS",
+      "shares": 186.0,
+      "avg_cost": 107.44,
+      "live_price": 107.44,
+      "invested": 19984.0,
+      "current": 19984.0,
+      "pnl": 0.0,
+      "pnl_pct": 0.0
+    },
+    {
+      "ticker": "JUNIORBEES.NS",
+      "shares": 26.0,
+      "avg_cost": 763.38,
+      "live_price": 763.38,
+      "invested": 19848.0,
+      "current": 19848.0,
+      "pnl": 0.0,
+      "pnl_pct": 0.0
+    }
+  ],
+  "usd_inr": 94.34,
+  "last_run_date": "2026-04-27",
+  "signal_date": "2026-04-23"
 }
