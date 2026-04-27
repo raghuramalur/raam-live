@@ -1,0 +1,42 @@
+name: RAAM Live P&L Updater
+
+on:
+  schedule:
+    # Every 5 min, Mon-Fri, 9:15 AM to 3:30 PM IST (3:45-10:00 UTC)
+    - cron: '*/5 3-10 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  update_pnl:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: raam-pnl-${{ hashFiles('requirements.txt') }}
+
+      - run: pip install -r requirements.txt
+
+      - name: Update P&L
+        env:
+          UPSTOX_TOKEN: ${{ secrets.UPSTOX_TOKEN }}
+          PORTFOLIO_VALUE: ${{ secrets.PORTFOLIO_VALUE }}
+          MODE: ${{ secrets.MODE }}
+        run: python raam_pnl.py
+
+      - name: Commit dashboard
+        run: |
+          git config user.name "RAAM-Bot"
+          git config user.email "raam@github-actions"
+          git add dashboard_data.json
+          git diff --staged --quiet || git commit -m "P&L update $(date +'%H:%M')"
+          git push
