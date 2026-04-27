@@ -78,11 +78,32 @@ print(f"USD/INR: {usd_inr:.2f}")
 signals_df     = pd.read_csv(SIGNAL_FILE, index_col="Date", parse_dates=True)
 active_tickers = signals_df.columns.tolist()     # includes BTC-USD
 
-# ── 2. DOWNLOAD PRICES (180-day window, strip BTC weekends) ──────────────────
-print("Downloading prices...")
+# ── 2. DOWNLOAD PRICES (one-by-one with retry — GitHub Actions IPs get rate limited) ──
+print("Downloading prices (individual with retry)...")
 all_tickers = active_tickers + ["LIQUIDBEES.NS"]
-raw_closes  = yf.download(all_tickers, period="180d", progress=False)["Close"]
-nifty_dates = raw_closes["NIFTYBEES.NS"].dropna().index   # ← weekend fix
+
+def download_with_retry(tickers, period="180d", max_retries=5):
+    frames = {}
+    for ticker in tickers:
+        for attempt in range(max_retries):
+            try:
+                time.sleep(2 + attempt * 3)
+                raw = yf.download(ticker, period=period, auto_adjust=True,
+                                  progress=False, timeout=30)
+                if raw.empty:
+                    raise ValueError("empty")
+                frames[ticker] = raw["Close"]
+                print(f"  ✓ {ticker}")
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    print(f"  ✗ {ticker} gave up: {e}")
+                else:
+                    print(f"  retry {attempt+1} {ticker}")
+    return pd.DataFrame(frames)
+
+raw_closes  = download_with_retry(all_tickers)
+nifty_dates = raw_closes["NIFTYBEES.NS"].dropna().index
 closes      = raw_closes.loc[raw_closes.index.isin(nifty_dates)].ffill()
 
 # ── 3. ALIGN SIGNALS + PRICES ────────────────────────────────────────────────
