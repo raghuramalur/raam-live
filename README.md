@@ -1,93 +1,108 @@
 # RAAM Live — Automated Weekly Execution + Dashboard
 
-## Free stack
+**100% free. Zero ongoing cost. Runs itself every Friday.**
+
 | Component | Service | Cost |
 |---|---|---|
-| Weekly automation | GitHub Actions | Free (2000 min/month) |
-| Dashboard hosting | GitHub Pages | Free |
-| Data storage | This repo | Free |
+| Weekly automation | GitHub Actions | Free (uses ~8 min/month of 2000 free) |
+| Dashboard hosting | GitHub Pages | Free forever |
 | Price data | yfinance | Free |
+| ETF orders | Upstox API | Free (brokerage on trades only) |
+| BTC orders | Binance API | Free (commission on trades only) |
 
 ---
 
-## Setup (one-time, ~10 minutes)
+## One-time setup (~10 minutes)
 
-### Step 1 — Create a GitHub repo
+### Step 1 — Create a private GitHub repo
 
-1. Go to github.com → New repository
-2. Name it `raam-live`
-3. Set to **Private** (keeps your trade data private)
-4. Upload these files:
-   - `raam_runner.py`
-   - `requirements.txt`
-   - `index.html`
-   - `.github/workflows/raam_weekly.yml`
-   - `data/stage_3/master_ensemble_signals.csv`  ← copy from your notebook folder
-   - `data/stage_3/trade_log.csv`                ← copy if it exists, else skip
+1. github.com → New repository → name it `raam-live` → **Private**
+2. Upload ALL these files, keeping the folder structure:
+   ```
+   raam-live/
+   ├── raam_runner.py
+   ├── requirements.txt
+   ├── index.html
+   ├── dashboard_data.json          ← placeholder, gets updated by workflow
+   ├── README.md
+   ├── .github/
+   │   └── workflows/
+   │       └── raam_weekly.yml
+   └── data/
+       └── stage_3/
+           └── master_ensemble_signals.csv   ← COPY FROM YOUR NOTEBOOK FOLDER
+   ```
+3. `master_ensemble_signals.csv` is in your notebook folder at `data/stage_3/`. Copy it to the repo.
 
-### Step 2 — Add secrets (your API keys, securely)
+### Step 2 — Add GitHub Secrets (your credentials, stored securely)
 
-In your GitHub repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+Repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
 
-Add these one by one:
+| Secret Name | Value | Required? |
+|---|---|---|
+| `UPSTOX_TOKEN` | Your Upstox sandbox/live access token | ✅ Always |
+| `PORTFOLIO_VALUE` | e.g. `60000` | ✅ Always |
+| `MODE` | `sandbox` (paper) or `live` (real money) | ✅ Always |
+| `BINANCE_API_KEY` | Your Binance API key | Only if you want BTC orders |
+| `BINANCE_SECRET_KEY` | Your Binance secret key | Only if you want BTC orders |
 
-| Secret name | Value |
-|---|---|
-| `UPSTOX_TOKEN` | Your 30-day sandbox access token |
-| `PORTFOLIO_VALUE` | `60000` |
-| `MODE` | `sandbox` |
-| `BINANCE_API_KEY` | Your Binance API key (optional, for BTC) |
-| `BINANCE_SECRET_KEY` | Your Binance secret (optional, for BTC) |
+> **BTC note:** If you don't add Binance keys, BTC is silently skipped and its  
+> weight goes to LIQUIDBEES (cash). Everything else still works perfectly.
 
 ### Step 3 — Enable GitHub Pages
 
 1. Repo → **Settings** → **Pages**
 2. Source: **Deploy from a branch**
 3. Branch: `main`, folder: `/ (root)`
-4. Click **Save**
-5. Your dashboard URL: `https://{your-github-username}.github.io/raam-live/`
+4. Save → your dashboard is live at: `https://{your-username}.github.io/raam-live/`
 
-### Step 4 — Test the workflow manually
+### Step 4 — Test it right now (manual run)
 
 1. Repo → **Actions** tab
-2. Click **RAAM Weekly Execution Engine**
-3. Click **Run workflow** → **Run workflow**
-4. Watch the logs — should take ~45 seconds
-5. After it finishes, open your GitHub Pages URL to see the dashboard
+2. Click **RAAM Weekly Execution Engine** → **Run workflow** → **Run workflow**
+3. Watch the logs (~45 seconds)
+4. Open your GitHub Pages URL — you should see the dashboard
 
 ---
 
-## Weekly automation
+## How it works every Friday
 
-The workflow runs **every Friday at 3:30 PM IST automatically** (no action needed from you).
-
-It:
-1. Downloads fresh price data via yfinance
-2. Reads the pre-computed signal matrix from the repo
-3. Computes this week's target allocation using RAAM hysteresis logic
-4. Places orders via Upstox API (sandbox or live)
-5. Updates `trade_log.csv` and `dashboard_data.json`
-6. Commits everything back to the repo
-7. GitHub Pages serves the updated dashboard
+```
+3:30 PM IST  →  GitHub Actions wakes up automatically
+               Downloads fresh prices via yfinance
+               Reads master_ensemble_signals.csv from repo
+               Applies RAAM hysteresis momentum ranking
+               Places ETF orders via Upstox API (AMO → executes Monday 9:15 AM)
+               Places BTC order via Binance API (if keys provided)
+               Updates dashboard_data.json
+               Commits changes back to repo
+               GitHub Pages serves updated dashboard
+You           →  Open the dashboard link any time to see your portfolio
+```
 
 ---
 
-## Updating your token (every 30 days)
+## Keeping your token fresh
 
-Sandbox tokens expire after 30 days. When it expires:
-1. Go to account.upstox.com/developer/apps#sandbox
-2. Click Generate to get a new token
-3. In GitHub: Settings → Secrets → Update `UPSTOX_TOKEN`
+Upstox sandbox tokens expire every 30 days.
+
+1. Go to `account.upstox.com/developer/apps#sandbox`
+2. Click **Generate** to get a new token
+3. GitHub: Settings → Secrets → `UPSTOX_TOKEN` → **Update**
 4. Done — next run picks it up automatically
 
+When you go live, generate a live token the same way from your live app.
+
 ---
 
-## Going live (when ready)
+## Going live checklist
 
-1. Create a live Upstox developer app at account.upstox.com/developer/apps
-2. Update GitHub Secrets: `MODE=live`, new `UPSTOX_TOKEN` (live token)
-3. Register your GitHub Actions IP with Upstox (SEBI requirement)
-   - GitHub Actions runs on Microsoft Azure IPs
-   - You need a static IP for live trading — for this use a VPS or Upstox's broker API delegation
-
-Note: For true live trading with SEBI compliance, a ₹500/month VPS with a static IP is cleaner than GitHub Actions.
+- [ ] 4+ weeks of paper trading validated
+- [ ] Created live Upstox developer app
+- [ ] Static IP registered with Upstox (SEBI requirement)
+  - Cheapest: DigitalOcean/AWS Lightsail VPS at ₹500/month
+  - For live trading, run the script from the VPS, not GitHub Actions
+    (GitHub Actions IPs change every run and can't be whitelisted)
+- [ ] Changed `MODE` secret to `live`
+- [ ] Updated `UPSTOX_TOKEN` secret to live token
+- [ ] Start with small capital (₹50,000–1,00,000)
