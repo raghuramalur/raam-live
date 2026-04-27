@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from datetime import date, datetime
+import time
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────────
 UPSTOX_TOKEN    = os.environ["UPSTOX_TOKEN"]
