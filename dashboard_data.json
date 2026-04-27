@@ -1,0 +1,15 @@
+{
+  "generated_at": "1970-01-01T00:00:00Z",
+  "mode": "sandbox",
+  "portfolio_value": 60000,
+  "total_invested": 0,
+  "current_value": 0,
+  "net_pnl": 0,
+  "net_pnl_pct": 0.0,
+  "breadth": 0,
+  "breadth_max": 11,
+  "target_alloc": { "LIQUIDBEES.NS": 100.0 },
+  "positions": [],
+  "next_rebalance": "Next Friday 3:30 PM IST",
+  "last_run_date": "never"
+}
