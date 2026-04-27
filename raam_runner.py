@@ -1,8 +1,8 @@
 """
-raam_runner.py  —  RAAM Weekly Execution Engine v4
+raam_runner.py  —  RAAM Weekly Execution Engine v5
 Data sources:
   - Indian ETFs : Upstox Historical Candle Data V3 API
-  - BTC closes  : CoinGecko public API (free, no auth, not blocked by GH Actions)
+  - BTC closes  : CoinGecko public API (free, no auth, works from GH Actions)
   - USD/INR rate: exchangerate-api.com free endpoint
   - BTC orders  : Binance authenticated API (if keys provided)
   - ETF orders  : Upstox order placement API
@@ -54,8 +54,8 @@ AUTH_HEADERS = {
 }
 
 print(f"{'='*65}")
-print(f"RAAM RUNNER v4 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} | {MODE.upper()}")
-print(f"Data: Upstox Historical API + CoinGecko BTC")
+print(f"RAAM RUNNER v5 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} | {MODE.upper()}")
+print(f"Data: Upstox V3 Historical API + CoinGecko BTC")
 print(f"{'='*65}")
 
 # ── 1. USD/INR RATE ───────────────────────────────────────────────────────────
@@ -73,6 +73,14 @@ def get_usd_inr():
 usd_inr = get_usd_inr()
 print(f"USD/INR: {usd_inr:.2f}")
 
+# ── HELPER: strip timezone from any Timestamp ─────────────────────────────────
+def strip_tz(ts):
+    """Convert any Timestamp to tz-naive midnight."""
+    t = pd.Timestamp(ts)
+    if t.tzinfo is not None:
+        t = t.tz_convert("UTC").tz_localize(None)
+    return t.normalize()
+
 # ── 2. UPSTOX HISTORICAL DAILY CLOSES ────────────────────────────────────────
 def get_upstox_daily_closes(instrument_key, days_back=HIST_DAYS):
     to_date   = date.today().strftime("%Y-%m-%d")
@@ -88,7 +96,8 @@ def get_upstox_daily_closes(instrument_key, days_back=HIST_DAYS):
                 rows = {}
                 for c in candles:
                     # candle = [timestamp, open, high, low, close, volume, oi]
-                    dt = pd.Timestamp(c[0]).normalize()  # ← Timestamp, not date
+                    # strip_tz removes +05:30 → tz-naive midnight Timestamp
+                    dt = strip_tz(c[0])
                     rows[dt] = float(c[4])
                 return pd.Series(rows).sort_index()
             else:
@@ -100,10 +109,6 @@ def get_upstox_daily_closes(instrument_key, days_back=HIST_DAYS):
 
 # ── 3. BTC HISTORICAL CLOSES IN INR (COINGECKO) ──────────────────────────────
 def get_btc_daily_closes_inr(days_back=HIST_DAYS):
-    """
-    CoinGecko public API — free, no auth, works from GitHub Actions.
-    Returns INR prices directly so no USD/INR conversion needed.
-    """
     url = (f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
            f"?vs_currency=inr&days={days_back}&interval=daily")
     try:
@@ -112,7 +117,7 @@ def get_btc_daily_closes_inr(days_back=HIST_DAYS):
         prices = r.json()["prices"]  # [[timestamp_ms, price_inr], ...]
         rows = {}
         for p in prices:
-            # Normalize to midnight Timestamp to match other tickers
+            # pd.Timestamp with unit="ms" is already tz-naive — just normalize
             dt = pd.Timestamp(p[0], unit="ms").normalize()
             rows[dt] = float(p[1])
         s = pd.Series(rows).sort_index()
@@ -127,7 +132,8 @@ def get_live_price_inr(ticker):
     if ticker == "BTC-USD":
         try:
             r = requests.get(
-                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=inr",
+                "https://api.coingecko.com/api/v3/simple/price"
+                "?ids=bitcoin&vs_currencies=inr",
                 timeout=10, headers={"User-Agent": "Mozilla/5.0"}
             )
             return float(r.json()["bitcoin"]["inr"])
@@ -183,21 +189,19 @@ for ticker in active_tickers + ["LIQUIDBEES.NS"]:
     time.sleep(0.3)
 
 if len(closes_dict) < 5:
-    raise RuntimeError(f"Only {len(closes_dict)} tickers loaded. Aborting.")
+    raise RuntimeError(f"Only {len(closes_dict)} tickers. Aborting.")
 
-# Build DataFrame with DatetimeIndex — everything normalized to midnight Timestamps
+# All Series now have tz-naive DatetimeIndex → safe to combine
 raw_closes  = pd.DataFrame(closes_dict)
-raw_closes.index = pd.to_datetime(raw_closes.index)   # ← FIX: ensure DatetimeIndex
 nifty_dates = raw_closes["NIFTYBEES.NS"].dropna().index
 closes      = raw_closes.loc[raw_closes.index.isin(nifty_dates)].ffill()
 
 print(f"\nCloses matrix: {closes.shape[0]} rows × {closes.shape[1]} columns")
 
 # ── 6. ALIGN SIGNALS + COMPUTE MOMENTUM ──────────────────────────────────────
-# Both signals_df and closes now have Timestamp DatetimeIndex — safe to join
 aligned  = signals_df.join(closes, how="inner", lsuffix="_sig", rsuffix="_px")
 sigs_cols = [c for c in aligned.columns if c.endswith("_sig")]
-signals  = aligned[sigs_cols].rename(columns=lambda c: c.replace("_sig", ""))
+signals   = aligned[sigs_cols].rename(columns=lambda c: c.replace("_sig", ""))
 
 available_active = [t for t in active_tickers if t in closes.columns]
 mom_12w = closes[available_active].pct_change(periods=60).fillna(0)
