@@ -519,7 +519,7 @@ async function load() {
     ).join('');
 
     document.getElementById('gen-time').textContent =
-      'GENERATED: ' + new Date(d.generated_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}) + ' IST';
+      'P&L UPDATED: ' + (d.last_pnl_update || d.generated_at);
 
     // Fade in
     document.getElementById('loading').style.display = 'none';
