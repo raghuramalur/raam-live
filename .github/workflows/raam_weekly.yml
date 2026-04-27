@@ -1,0 +1,44 @@
+name: RAAM Weekly Execution Engine
+
+on:
+  schedule:
+    - cron: '0 10 * * 5'
+  workflow_dispatch:
+
+jobs:
+  raam_execute:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: raam-${{ hashFiles('requirements.txt') }}
+
+      - run: pip install -r requirements.txt
+
+      - name: Run RAAM engine
+        env:
+          UPSTOX_TOKEN:       ${{ secrets.UPSTOX_TOKEN }}
+          PORTFOLIO_VALUE:    ${{ secrets.PORTFOLIO_VALUE }}
+          MODE:               ${{ secrets.MODE }}
+          BINANCE_API_KEY:    ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_SECRET_KEY: ${{ secrets.BINANCE_SECRET_KEY }}
+        run: python raam_runner.py
+
+      - name: Commit results
+        run: |
+          git config user.name "RAAM-Bot"
+          git config user.email "raam@github-actions"
+          git add dashboard_data.json
+          git add data/stage_3/trade_log.csv || true
+          git diff --staged --quiet || git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
+          git push
