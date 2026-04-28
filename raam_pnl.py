@@ -1,7 +1,8 @@
 import os, json, requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from urllib.parse import quote
+import yfinance as yf
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 UPSTOX_TOKEN   = os.environ.get("UPSTOX_TOKEN", "")
@@ -33,9 +34,9 @@ AUTH_HEADERS = {
     "Accept"       : "application/json",
 }
 
-# ── LIVE PRICE FETCHING (NO YFINANCE) ─────────────────────────────────────────
+# ── LIVE PRICE FETCHING (TRIPLE FALLBACK) ─────────────────────────────────────
 def get_live_price_inr(ticker):
-    """Fetches live prices directly from Upstox and CoinGecko."""
+    """Fetches live prices with fail-safes and strict error logging."""
     # 1. Handle Bitcoin (CoinGecko)
     if ticker == "BTC-USD":
         try:
@@ -45,25 +46,53 @@ def get_live_price_inr(ticker):
             )
             return float(r.json()["bitcoin"]["inr"])
         except Exception as e:
-            print(f"  [WARN] BTC live price error: {e}")
+            print(f"  [WARN] BTC CoinGecko error: {e}")
             return None
 
     # 2. Handle Upstox ETFs
     inst = INSTRUMENT_MAP.get(ticker)
-    if not inst:
-        return None
+    if not inst: return None
+    encoded = quote(inst, safe="")
+
+    # ATTEMPT 1: Upstox V2 Quotes
     try:
-        encoded = quote(inst, safe="")
         url = f"{UPSTOX_HIST_BASE}/v2/market-quote/quotes?instrument_key={encoded}"
-        r   = requests.get(url, headers=AUTH_HEADERS, timeout=10)
+        r   = requests.get(url, headers=AUTH_HEADERS, timeout=5)
         if r.status_code == 200:
             for v in r.json().get("data", {}).values():
                 ltp = v.get("last_price") or v.get("ltp") or 0
-                if ltp > 0:
-                    return float(ltp)
+                if ltp > 0: return float(ltp)
+        else:
+            print(f"  [DEBUG] Upstox V2 Quotes rejected {ticker}: HTTP {r.status_code} - {r.text[:60]}")
     except Exception as e:
-        print(f"  [WARN] Upstox live price error for {ticker}: {e}")
-        
+        print(f"  [WARN] Upstox V2 Quotes connection error: {e}")
+
+    # ATTEMPT 2: Yahoo Finance fast_info (Bypasses Upstox token/IP limits)
+    try:
+        lp = float(yf.Ticker(ticker).fast_info.last_price)
+        if lp > 0: 
+            print(f"  [DEBUG] Recovered {ticker} price via yfinance fast_info")
+            return lp
+    except Exception as e:
+        print(f"  [DEBUG] Yfinance fast_info rejected {ticker}: {e}")
+
+    # ATTEMPT 3: Upstox V3 Historical (Matches your raam_runner.py fallback)
+    try:
+        to_date   = date.today().strftime("%Y-%m-%d")
+        from_date = (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+        url = f"{UPSTOX_HIST_BASE}/v3/historical-candle/{encoded}/days/1/{to_date}/{from_date}"
+        r = requests.get(url, headers=AUTH_HEADERS, timeout=5)
+        if r.status_code == 200:
+            candles = r.json().get("data", {}).get("candles", [])
+            if candles:
+                print(f"  [DEBUG] Recovered {ticker} price via Upstox V3 Historical")
+                return float(candles[0][4]) # Latest close price
+        else:
+            print(f"  [DEBUG] Upstox V3 Historical rejected: HTTP {r.status_code}")
+    except Exception as e:
+        print(f"  [WARN] Upstox V3 error: {e}")
+
+    print(f"  [ERROR] CRITICAL: All 3 pricing pipelines failed for {ticker}!")
     return None
 
 # ── CALCULATE P&L AND UPDATE DASHBOARD ────────────────────────────────────────
@@ -104,12 +133,12 @@ total_cur = 0.0
 
 for t, qty in holdings.items():
     if qty < 0.0001: 
-        continue # Skip zeroed out positions
+        continue 
         
     lp  = get_live_price_inr(t)
     inv = cost_basis.get(t, 0.0)
     
-    # Fallback to average cost if API fails momentarily so P&L doesn't break
+    # Fallback to average cost ONLY if all 3 APIs fail
     if not lp:
         lp = inv / qty if qty > 0 else 0
         
@@ -119,7 +148,7 @@ for t, qty in holdings.items():
     
     positions_list.append({
         "ticker": t, 
-        "shares": round(qty, 5),
+        "shares": round(qty, 5) if ticker == "BTC-USD" else int(qty),
         "avg_cost": round(inv/qty, 2) if qty else 0,
         "live_price": round(lp, 2), 
         "invested": round(inv, 0),
