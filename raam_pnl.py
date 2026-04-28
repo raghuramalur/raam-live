@@ -1,9 +1,14 @@
 """
 raam_pnl.py — Live P&L updater, runs every 5 min during market hours.
-When market is closed, falls back to last known close price from Upstox
-historical API so P&L shows correct values 24/7.
+
+Price source priority:
+  1. Upstox V2 LTP API     (only works with LIVE tokens, not sandbox)
+  2. NSE public quote API  (free, no auth, works for any ETF)
+  3. Upstox V3 historical  (works with sandbox tokens, returns last close)
+
+For BTC: CoinGecko returns price directly in INR — no conversion needed.
 """
-import os, json, requests
+import os, json, requests, time
 import pandas as pd
 from datetime import datetime, date, timedelta
 from urllib.parse import quote
@@ -21,27 +26,89 @@ AUTH_HEADERS = {
     "Content-Type": "application/json",
 }
 
+# ETF ticker → (Upstox instrument key, NSE trading symbol)
 INSTRUMENT_MAP = {
-    "NIFTYBEES.NS"  : "NSE_EQ|INF204KB14I2",
-    "JUNIORBEES.NS" : "NSE_EQ|INF732E01045",
-    "GOLDBEES.NS"   : "NSE_EQ|INF204KB17I5",
-    "BANKBEES.NS"   : "NSE_EQ|INF204KB15I9",
-    "LIQUIDBEES.NS" : "NSE_EQ|INF732E01037",
-    "ITBEES.NS"     : "NSE_EQ|INF204KB15V2",
-    "PHARMABEES.NS" : "NSE_EQ|INF204KC1089",
-    "INFRABEES.NS"  : "NSE_EQ|INF732E01268",
-    "AUTOBEES.NS"   : "NSE_EQ|INF204KC1337",
-    "CPSEETF.NS"    : "NSE_EQ|INF457M01133",
-    "HNGSNGBEES.NS" : "NSE_EQ|INF204KB19I1",
-    "MON100.NS"     : "NSE_EQ|INF247L01AP3",
-    "BTC-USD"       : None,
+    "NIFTYBEES.NS"  : ("NSE_EQ|INF204KB14I2", "NIFTYBEES"),
+    "JUNIORBEES.NS" : ("NSE_EQ|INF732E01045", "JUNIORBEES"),
+    "GOLDBEES.NS"   : ("NSE_EQ|INF204KB17I5", "GOLDBEES"),
+    "BANKBEES.NS"   : ("NSE_EQ|INF204KB15I9", "BANKBEES"),
+    "LIQUIDBEES.NS" : ("NSE_EQ|INF732E01037", "LIQUIDBEES"),
+    "ITBEES.NS"     : ("NSE_EQ|INF204KB15V2", "ITBEES"),
+    "PHARMABEES.NS" : ("NSE_EQ|INF204KC1089", "PHARMABEES"),
+    "INFRABEES.NS"  : ("NSE_EQ|INF732E01268", "INFRABEES"),
+    "AUTOBEES.NS"   : ("NSE_EQ|INF204KC1337", "AUTOBEES"),
+    "CPSEETF.NS"    : ("NSE_EQ|INF457M01133", "CPSEETF"),
+    "HNGSNGBEES.NS" : ("NSE_EQ|INF204KB19I1", "HNGSNGBEES"),
+    "MON100.NS"     : ("NSE_EQ|INF247L01AP3", "MON100"),
+    "BTC-USD"       : (None, None),
 }
+
+# ── NSE PUBLIC SESSION (auto-cookie) ──────────────────────────────────────────
+_nse_session = None
+
+def get_nse_session():
+    """NSE requires a session cookie before serving API responses."""
+    global _nse_session
+    if _nse_session is not None:
+        return _nse_session
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"),
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.nseindia.com/",
+    })
+    try:
+        # First request to nseindia.com sets required cookies
+        s.get("https://www.nseindia.com/", timeout=10)
+        time.sleep(0.5)
+        _nse_session = s
+    except Exception as e:
+        print(f"    [DEBUG] NSE session init failed: {e}")
+    return _nse_session
+
+
+def get_nse_live_price(symbol):
+    """Get live ETF price from NSE public API (no auth required)."""
+    s = get_nse_session()
+    if s is None:
+        return None
+    try:
+        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
+        r = s.get(url, timeout=10)
+        if r.ok:
+            data = r.json()
+            ltp = data.get("priceInfo", {}).get("lastPrice")
+            if ltp and float(ltp) > 0:
+                return float(ltp)
+    except Exception as e:
+        print(f"    [DEBUG] NSE quote {symbol}: {e}")
+    return None
+
+
+def get_upstox_v2_ltp(instrument_key):
+    """Try Upstox V2 LTP — works only with LIVE tokens, not sandbox."""
+    try:
+        enc = quote(instrument_key, safe="")
+        url = f"{UPSTOX_BASE}/v2/market-quote/ltp?instrument_key={enc}"
+        r   = requests.get(url, headers=AUTH_HEADERS, timeout=10)
+        if r.ok:
+            data = r.json().get("data", {})
+            for key, val in data.items():
+                p = val.get("last_price")
+                if p and float(p) > 0:
+                    return float(p)
+    except Exception:
+        pass
+    return None
 
 
 def get_upstox_last_close(instrument_key):
-    """Fetch the most recent daily close from Upstox historical API."""
+    """V3 historical — works with sandbox tokens, returns last daily close."""
     to_date   = date.today().strftime("%Y-%m-%d")
-    from_date = (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+    from_date = (date.today() - timedelta(days=10)).strftime("%Y-%m-%d")
     encoded   = quote(instrument_key, safe="")
     url = (f"{UPSTOX_BASE}/v3/historical-candle"
            f"/{encoded}/days/1/{to_date}/{from_date}")
@@ -50,18 +117,20 @@ def get_upstox_last_close(instrument_key):
         if r.ok:
             candles = r.json().get("data", {}).get("candles", [])
             if candles:
-                val = float(candles[0][4])
-                print(f"    [DEBUG] Upstox V3 Historical returned: ₹{val}")
-                return val
-        else:
-            print(f"    [DEBUG] Upstox V3 Error {r.status_code}: {r.text[:80]}")
+                return float(candles[0][4])
     except Exception as e:
-        print(f"    [DEBUG] Upstox V3 Exception: {e}")
+        print(f"    [DEBUG] Upstox V3 hist: {e}")
     return None
 
 
 def live_price_inr(ticker):
-    print(f"\n  ➤ Fetching pricing data for: {ticker}")
+    """
+    Resolves the best available price for any ticker.
+    Tries: Upstox live → NSE live → Upstox historical (last close)
+    """
+    print(f"\n  ➤ {ticker}")
+
+    # ── BTC via CoinGecko (returns INR directly) ──
     if ticker == "BTC-USD":
         try:
             r = requests.get(
@@ -70,44 +139,37 @@ def live_price_inr(ticker):
                 timeout=10, headers={"User-Agent": "Mozilla/5.0"}
             )
             val = float(r.json()["bitcoin"]["inr"])
-            print(f"    [DEBUG] CoinGecko returned: ₹{val}")
+            print(f"    CoinGecko: ₹{val:,.0f}")
             return val
         except Exception as e:
-            print(f"    [DEBUG] CoinGecko Exception: {e}")
+            print(f"    [WARN] CoinGecko: {e}")
             return None
 
-    inst = INSTRUMENT_MAP.get(ticker)
-    if not inst:
+    inst_key, nse_symbol = INSTRUMENT_MAP.get(ticker, (None, None))
+    if not inst_key:
         return None
 
-    ltp = None
-    try:
-        enc = quote(inst, safe="")
-        url = f"{UPSTOX_BASE}/v2/market-quote/ltp?instrument_key={enc}"
-        r = requests.get(url, headers=AUTH_HEADERS, timeout=10)
-        
-        print(f"    [DEBUG] Upstox V2 LTP HTTP Status: {r.status_code}")
-        if r.ok:
-            data = r.json().get("data", {})
-            if inst in data:
-                p = data[inst].get("last_price")
-                print(f"    [DEBUG] Upstox V2 LTP exact value: {p}")
-                if p and float(p) > 0:
-                    ltp = float(p)
-            else:
-                print(f"    [DEBUG] Instrument key not found in LTP response.")
-        else:
-             print(f"    [DEBUG] Upstox V2 LTP Response: {r.text[:80]}")
-    except Exception as e:
-        print(f"    [DEBUG] Upstox V2 LTP Exception: {e}")
+    # ── 1. Try Upstox V2 LTP (live tokens only) ──
+    val = get_upstox_v2_ltp(inst_key)
+    if val:
+        print(f"    Upstox LTP: ₹{val:,.2f}")
+        return val
 
-    # Fallback Trigger
-    if not ltp or ltp == 0:
-        print(f"    [DEBUG] Live quote failed or returned 0. Falling back to Historical...")
-        ltp = get_upstox_last_close(inst)
+    # ── 2. Try NSE public API (free, real-time during market hours) ──
+    if nse_symbol:
+        val = get_nse_live_price(nse_symbol)
+        if val:
+            print(f"    NSE live:   ₹{val:,.2f}")
+            return val
 
-    print(f"    [DEBUG] Final Resolved Price for {ticker}: ₹{ltp}")
-    return ltp
+    # ── 3. Fall back to last historical close ──
+    val = get_upstox_last_close(inst_key)
+    if val:
+        print(f"    Last close: ₹{val:,.2f}")
+        return val
+
+    print(f"    [WARN] No price available")
+    return None
 
 
 # ── Load existing dashboard ──────────────────────────────────────────────────
@@ -125,7 +187,6 @@ if os.path.exists(TRADE_LOG):
     tl = pd.read_csv(TRADE_LOG)
     tl["quantity"] = pd.to_numeric(tl["quantity"], errors="coerce").fillna(0)
     tl["price"]    = pd.to_numeric(tl["price"],    errors="coerce").fillna(0)
-
     if "order_id" in tl.columns:
         tl = tl.drop_duplicates(subset=["order_id"], keep="first")
 
@@ -145,21 +206,16 @@ total_inv = total_cur = 0.0
 for t, qty in holdings.items():
     if qty < 0.0001:
         continue
-        
-    lp  = live_price_inr(t)
-    
+    lp = live_price_inr(t)
     if lp is None or lp == 0:
-        print(f"  [WARN] Final price is 0 for {t}, skipping P&L calculation for this asset.")
+        print(f"  [WARN] No price for {t}, skipping")
         continue
-        
-    inv = cost_basis.get(t, 0.0)
+    inv      = cost_basis.get(t, 0.0)
     avg_cost = inv / qty if qty > 0 else 0
-    cur = qty * lp
-    pnl = cur - inv
-    pnl_pct = (pnl / inv * 100) if inv > 0 else 0.0
-    
-    print(f"  [RESULT] {t} | Avg Cost: ₹{avg_cost:.2f} | Live: ₹{lp:.2f} | P&L: ₹{pnl:.2f}")
-    
+    cur      = qty * lp
+    pnl      = cur - inv
+    pnl_pct  = (pnl / inv * 100) if inv > 0 else 0.0
+
     positions_list.append({
         "ticker"    : t,
         "shares"    : round(qty, 5),
@@ -176,17 +232,17 @@ for t, qty in holdings.items():
 net_pnl     = total_cur - total_inv
 net_pnl_pct = (net_pnl / total_inv * 100) if total_inv > 0 else 0.0
 
-# ── Check if market is open (IST 9:15-15:30 on weekdays) ─────────────────────
-now_ist = datetime.utcnow().replace(tzinfo=None)
-ist_hour   = (now_ist.hour + 5) % 24
-ist_minute = (now_ist.minute + 30) % 60
-if now_ist.minute >= 30:
-    ist_hour = (now_ist.hour + 5 + 1) % 24
-ist_time = ist_hour * 60 + ist_minute   
-market_open = (9 * 60 + 15) <= ist_time <= (15 * 60 + 30)
-market_status = "LIVE" if market_open else "CLOSED — showing last close"
+# ── Market status (IST) ──────────────────────────────────────────────────────
+now_utc = datetime.utcnow()
+ist_min_total = (now_utc.hour * 60 + now_utc.minute + 330) % (24 * 60)
+weekday = (now_utc.weekday()) % 7  # Mon=0...Sun=6
+market_open = (
+    weekday < 5 and
+    (9 * 60 + 15) <= ist_min_total <= (15 * 60 + 30)
+)
+market_status = "LIVE" if market_open else "CLOSED — last close shown"
 
-# ── Merge with existing dashboard data ───────────────────────────────────────
+# ── Write dashboard ──────────────────────────────────────────────────────────
 dashboard = {
     **existing,
     "generated_at"    : datetime.utcnow().isoformat() + "Z",
@@ -204,9 +260,9 @@ dashboard = {
 with open(DASHBOARD_FILE, "w") as f:
     json.dump(dashboard, f, indent=2)
 
-print(f"\n==============================================")
-print(f"Market Status: {market_status}")
-print(f"TOTAL P&L: ₹{net_pnl:+,.0f} ({net_pnl_pct:+.2f}%)")
-print(f"Invested: ₹{total_inv:,.0f} | Current: ₹{total_cur:,.0f}")
-print(f"Updated @ {datetime.utcnow().strftime('%H:%M UTC')}")
-print(f"==============================================")
+print(f"\n{'='*55}")
+print(f"Market: {market_status}")
+print(f"P&L:     ₹{net_pnl:+,.0f} ({net_pnl_pct:+.2f}%)")
+print(f"Inv:     ₹{total_inv:,.0f}  →  Cur: ₹{total_cur:,.0f}")
+print(f"Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+print(f"{'='*55}")
