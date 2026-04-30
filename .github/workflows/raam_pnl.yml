@@ -38,5 +38,11 @@ jobs:
           git config user.name "RAAM-Bot"
           git config user.email "raam@github-actions"
           git add dashboard_data.json
+          
+          # Only commit if there are changes
           git diff --staged --quiet || git commit -m "P&L update $(date +'%H:%M')"
+          
+          # MAGIC FIX: Pull and rebase any changes made by the Weekly Runner or you manually
+          git pull --rebase origin main
+          
           git push
