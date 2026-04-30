@@ -42,7 +42,8 @@ jobs:
           # Only commit if there are changes
           git diff --staged --quiet || git commit -m "P&L update $(date +'%H:%M')"
           
-          # MAGIC FIX: Pull and rebase any changes made by the Weekly Runner or you manually
-          git pull --rebase origin main
+          # MAGIC FIX: Pull the latest code. If both bots edited the JSON at the exact same time, 
+          # the '-X theirs' command tells Git to prioritize THIS bot's newer live price.
+          git pull --rebase -X theirs origin main
           
           git push
