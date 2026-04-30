@@ -40,5 +40,11 @@ jobs:
           git config user.email "raam@github-actions"
           git add dashboard_data.json
           git add data/stage_3/trade_log.csv || true
+          
+          # Only commit if there are changes
           git diff --staged --quiet || git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
+          
+          # MAGIC FIX: Pull and rebase any changes made by the P&L Updater or you manually
+          git pull --rebase origin main
+          
           git push
