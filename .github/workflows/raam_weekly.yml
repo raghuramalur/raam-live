@@ -13,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # <--- FIX 1: Forces GitHub to download full history so rebase works
 
       - uses: actions/setup-python@v5
         with:
@@ -34,7 +36,7 @@ jobs:
           BINANCE_SECRET_KEY: ${{ secrets.BINANCE_SECRET_KEY }}
         run: python raam_runner.py
 
-      - name: Commit results
+      - name: Commit results with Auto-Retry
         run: |
           git config user.name "RAAM-Bot"
           git config user.email "raam@github-actions"
@@ -42,9 +44,19 @@ jobs:
           git add data/stage_3/trade_log.csv || true
           
           # Only commit if there are changes
-          git diff --staged --quiet || git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
-          
-          # MAGIC FIX: Pull and prioritize this runner's data if there is a collision
-          git pull --rebase -X theirs origin main
-          
-          git push
+          if ! git diff --staged --quiet; then
+            git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
+            
+            # <--- FIX 2: The Auto-Retry Loop --->
+            # If the remote changed, pull the changes, prioritize THIS bot's data on collision, and push.
+            for i in 1 2 3 4 5; do
+              git pull --rebase -X theirs origin main && git push origin main && exit 0
+              echo "Push collision detected! Retrying in 5 seconds... (Attempt $i of 5)"
+              sleep 5
+            done
+            
+            echo "Failed to push after 5 attempts."
+            exit 1
+          else
+            echo "No execution changes detected, skipping commit."
+          fi
