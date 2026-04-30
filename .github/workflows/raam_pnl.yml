@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # <--- FIX 1: Forces GitHub to download the full history so rebase works
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -35,27 +35,35 @@ jobs:
           MODE: ${{ secrets.MODE }}
         run: python raam_pnl.py
 
-      - name: Commit dashboard with Auto-Retry
+      - name: Commit dashboard (Fetch & Reset Method)
         run: |
           git config user.name "RAAM-Bot"
           git config user.email "raam@github-actions"
+          
+          # 1. Download the absolute latest state of the remote repository
+          git fetch origin main
+          
+          # 2. Force the local git history to match the remote EXACTLY. 
+          # (Because we don't use --hard, the new dashboard_data.json stays safely on the disk)
+          git reset origin/main
+          
+          # 3. Add our newly generated file
           git add dashboard_data.json
           
-          # Only commit if there are changes
+          # 4. Commit and Push. If it still fails, the 5-second retry loop catches it.
           if ! git diff --staged --quiet; then
             git commit -m "P&L update $(date +'%H:%M')"
             
-            # <--- FIX 2: The Auto-Retry Loop --->
-            # If the remote changed, pull the changes, rebase our JSON on top, and push.
-            # If it hits a millisecond collision, wait 5 seconds and try again.
             for i in 1 2 3 4 5; do
-              git pull --rebase -X theirs origin main && git push origin main && exit 0
-              echo "Push collision detected! Retrying in 5 seconds... (Attempt $i of 5)"
+              git push origin main && exit 0
+              echo "Collision! Re-syncing with remote... (Attempt $i)"
+              git fetch origin main
+              git reset origin/main
+              git add dashboard_data.json
+              git commit --amend --no-edit # Staple the change to the new top commit
               sleep 5
             done
-            
-            echo "Failed to push after 5 attempts."
             exit 1
           else
-            echo "No P&L changes detected, skipping commit."
+            echo "No changes detected."
           fi
