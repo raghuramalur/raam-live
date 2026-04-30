@@ -35,35 +35,42 @@ jobs:
           MODE: ${{ secrets.MODE }}
         run: python raam_pnl.py
 
-      - name: Commit dashboard (Fetch & Reset Method)
+      - name: Commit dashboard (rebase loop)
         run: |
           git config user.name "RAAM-Bot"
           git config user.email "raam@github-actions"
           
-          # 1. Download the absolute latest state of the remote repository
-          git fetch origin main
-          
-          # 2. Force the local git history to match the remote EXACTLY. 
-          # (Because we don't use --hard, the new dashboard_data.json stays safely on the disk)
-          git reset origin/main
-          
-          # 3. Add our newly generated file
+          # Stage our new file
           git add dashboard_data.json
           
-          # 4. Commit and Push. If it still fails, the 5-second retry loop catches it.
-          if ! git diff --staged --quiet; then
-            git commit -m "P&L update $(date +'%H:%M')"
-            
-            for i in 1 2 3 4 5; do
-              git push origin main && exit 0
-              echo "Collision! Re-syncing with remote... (Attempt $i)"
-              git fetch origin main
-              git reset origin/main
-              git add dashboard_data.json
-              git commit --amend --no-edit # Staple the change to the new top commit
-              sleep 5
-            done
-            exit 1
-          else
+          # Nothing to commit? Exit cleanly
+          if git diff --staged --quiet; then
             echo "No changes detected."
+            exit 0
           fi
+          
+          git commit -m "P&L update $(date -u +'%H:%M UTC')"
+          
+          # Push with rebase loop — handles concurrent runs correctly
+          for i in 1 2 3 4 5 6 7 8; do
+            if git push origin main; then
+              echo "Pushed successfully on attempt $i"
+              exit 0
+            fi
+            echo "Push rejected. Pulling remote with rebase... (attempt $i)"
+            
+            # Pull remote changes, replaying our commit on top
+            # -X ours means: if conflict in dashboard_data.json, prefer THEIR version
+            # then we add our newer data on top (next iteration regenerates anyway)
+            git pull --rebase -X ours origin main || git rebase --abort
+            
+            # Add file again in case rebase touched it
+            git add dashboard_data.json
+            git commit --amend --no-edit --allow-empty || true
+            
+            # Random jitter so two parallel runs don't lockstep collide again
+            sleep $((RANDOM % 5 + 2))
+          done
+          
+          echo "Failed to push after 8 attempts. Will retry next run."
+          exit 0   # don't fail the workflow — next run will catch up
