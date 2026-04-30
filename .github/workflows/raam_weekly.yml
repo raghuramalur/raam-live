@@ -36,36 +36,34 @@ jobs:
           BINANCE_SECRET_KEY: ${{ secrets.BINANCE_SECRET_KEY }}
         run: python raam_runner.py
 
-      - name: Commit results (Fetch & Reset Method)
+      - name: Commit results (rebase loop)
+        env:
+          GIT_MERGE_AUTOEDIT: no
         run: |
           git config user.name "RAAM-Bot"
           git config user.email "raam@github-actions"
           
-          # 1. Download the absolute latest state of the remote repository
-          git fetch origin main
-          
-          # 2. Force the local git history to match the remote EXACTLY. 
-          git reset origin/main
-          
-          # 3. Add our newly generated files
           git add dashboard_data.json
           git add data/stage_3/trade_log.csv || true
           
-          # 4. Commit and Push. Auto-retry loop catches collisions.
-          if ! git diff --staged --quiet; then
-            git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
-            
-            for i in 1 2 3 4 5; do
-              git push origin main && exit 0
-              echo "Collision! Re-syncing with remote... (Attempt $i)"
-              git fetch origin main
-              git reset origin/main
-              git add dashboard_data.json
-              git add data/stage_3/trade_log.csv || true
-              git commit --amend --no-edit # Staple the change to the new top commit
-              sleep 5
-            done
-            exit 1
-          else
-            echo "No execution changes detected, skipping commit."
+          if git diff --staged --quiet; then
+            echo "No changes."
+            exit 0
           fi
+          
+          git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
+          
+          for i in 1 2 3 4 5; do
+            if git push origin main; then
+              echo "Pushed on attempt $i"
+              exit 0
+            fi
+            echo "Push rejected, rebasing... (attempt $i)"
+            git pull --rebase -X ours origin main || git rebase --abort
+            git add dashboard_data.json
+            git add data/stage_3/trade_log.csv || true
+            git commit --amend --no-edit --allow-empty || true
+            sleep $((RANDOM % 5 + 3))
+          done
+          
+          exit 1
