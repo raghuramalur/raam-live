@@ -44,7 +44,7 @@ jobs:
           # Only commit if there are changes
           git diff --staged --quiet || git commit -m "RAAM auto-rebalance $(date +'%Y-%m-%d')"
           
-          # MAGIC FIX: Pull and rebase any changes made by the P&L Updater or you manually
-          git pull --rebase origin main
+          # MAGIC FIX: Pull and prioritize this runner's data if there is a collision
+          git pull --rebase -X theirs origin main
           
           git push
