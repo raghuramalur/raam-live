@@ -1,11 +1,16 @@
 """
-raam_runner.py  —  RAAM Weekly Execution Engine v5
+raam_runner.py  —  RAAM Weekly Execution Engine v6
+─────────────────────────────────────────────────────────────────────────────
+DELTA-AWARE: reads trade log to compute current holdings, only trades the
+difference between current and target. Eliminates the duplicate-buy bug.
+
 Data sources:
   - Indian ETFs : Upstox Historical Candle Data V3 API
-  - BTC closes  : CoinGecko public API (free, no auth, works from GH Actions)
+  - BTC closes  : CoinGecko public API (free, no auth, GH Actions friendly)
   - USD/INR rate: exchangerate-api.com free endpoint
-  - BTC orders  : Binance authenticated API (if keys provided)
+  - BTC orders  : Binance authenticated API (live mode only)
   - ETF orders  : Upstox order placement API
+─────────────────────────────────────────────────────────────────────────────
 """
 
 import os, json, math, time, requests
@@ -54,11 +59,11 @@ AUTH_HEADERS = {
 }
 
 print(f"{'='*65}")
-print(f"RAAM RUNNER v5 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} | {MODE.upper()}")
-print(f"Data: Upstox V3 Historical API + CoinGecko BTC")
+print(f"RAAM RUNNER v6 (delta-aware) | "
+      f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} | {MODE.upper()}")
 print(f"{'='*65}")
 
-# ── 1. USD/INR RATE ───────────────────────────────────────────────────────────
+# ── 1. USD/INR ────────────────────────────────────────────────────────────────
 def get_usd_inr():
     for url in ["https://api.exchangerate-api.com/v4/latest/USD",
                 "https://open.er-api.com/v6/latest/USD"]:
@@ -73,15 +78,15 @@ def get_usd_inr():
 usd_inr = get_usd_inr()
 print(f"USD/INR: {usd_inr:.2f}")
 
-# ── HELPER: strip timezone from any Timestamp ─────────────────────────────────
+# ── HELPER ────────────────────────────────────────────────────────────────────
 def strip_tz(ts):
-    """Convert any Timestamp to tz-naive midnight."""
+    """Convert tz-aware Timestamp → tz-naive midnight."""
     t = pd.Timestamp(ts)
     if t.tzinfo is not None:
         t = t.tz_convert("UTC").tz_localize(None)
     return t.normalize()
 
-# ── 2. UPSTOX HISTORICAL DAILY CLOSES ────────────────────────────────────────
+# ── 2. UPSTOX HISTORICAL CANDLES ─────────────────────────────────────────────
 def get_upstox_daily_closes(instrument_key, days_back=HIST_DAYS):
     to_date   = date.today().strftime("%Y-%m-%d")
     from_date = (date.today() - timedelta(days=days_back + 30)).strftime("%Y-%m-%d")
@@ -95,10 +100,8 @@ def get_upstox_daily_closes(instrument_key, days_back=HIST_DAYS):
                 candles = r.json()["data"]["candles"]
                 rows = {}
                 for c in candles:
-                    # candle = [timestamp, open, high, low, close, volume, oi]
-                    # strip_tz removes +05:30 → tz-naive midnight Timestamp
                     dt = strip_tz(c[0])
-                    rows[dt] = float(c[4])
+                    rows[dt] = float(c[4])  # close = index 4
                 return pd.Series(rows).sort_index()
             else:
                 print(f"  [WARN] {instrument_key} HTTP {r.status_code}: {r.text[:80]}")
@@ -107,27 +110,25 @@ def get_upstox_daily_closes(instrument_key, days_back=HIST_DAYS):
         time.sleep(1)
     return pd.Series(dtype=float)
 
-# ── 3. BTC HISTORICAL CLOSES IN INR (COINGECKO) ──────────────────────────────
+# ── 3. BTC CLOSES ─────────────────────────────────────────────────────────────
 def get_btc_daily_closes_inr(days_back=HIST_DAYS):
     url = (f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
            f"?vs_currency=inr&days={days_back}&interval=daily")
     try:
         r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
-        prices = r.json()["prices"]  # [[timestamp_ms, price_inr], ...]
         rows = {}
-        for p in prices:
-            # pd.Timestamp with unit="ms" is already tz-naive — just normalize
+        for p in r.json()["prices"]:
             dt = pd.Timestamp(p[0], unit="ms").normalize()
             rows[dt] = float(p[1])
         s = pd.Series(rows).sort_index()
         print(f"  ✓ BTC-USD ({len(s)} days, CoinGecko INR)")
         return s
     except Exception as e:
-        print(f"  ✗ BTC-USD CoinGecko failed: {e}")
+        print(f"  ✗ BTC-USD CoinGecko: {e}")
         return pd.Series(dtype=float)
 
-# ── 4. LIVE PRICE IN INR ─────────────────────────────────────────────────────
+# ── 4. LIVE PRICE ─────────────────────────────────────────────────────────────
 def get_live_price_inr(ticker):
     if ticker == "BTC-USD":
         try:
@@ -153,10 +154,8 @@ def get_live_price_inr(ticker):
                 ltp = v.get("last_price") or v.get("ltp") or 0
                 if ltp > 0:
                     return float(ltp)
-    except Exception as e:
-        print(f"  [WARN] live price {ticker}: {e}")
-
-    # Fallback: last close from historical
+    except Exception:
+        pass
     s = get_upstox_daily_closes(inst, days_back=5)
     return float(s.iloc[-1]) if len(s) > 0 else None
 
@@ -171,35 +170,29 @@ for ticker in active_tickers + ["LIQUIDBEES.NS"]:
         s = get_btc_daily_closes_inr()
         if len(s) > 0:
             closes_dict[ticker] = s
-        else:
-            print(f"  ✗ BTC-USD: no data")
         continue
 
     inst = INSTRUMENT_MAP.get(ticker)
     if not inst:
-        print(f"  ✗ {ticker}: no instrument key")
         continue
 
     s = get_upstox_daily_closes(inst)
     if len(s) > 0:
         closes_dict[ticker] = s
         print(f"  ✓ {ticker} ({len(s)} days)")
-    else:
-        print(f"  ✗ {ticker}: no data")
     time.sleep(0.3)
 
 if len(closes_dict) < 5:
-    raise RuntimeError(f"Only {len(closes_dict)} tickers. Aborting.")
+    raise RuntimeError(f"Only {len(closes_dict)} tickers loaded. Aborting.")
 
-# All Series now have tz-naive DatetimeIndex → safe to combine
 raw_closes  = pd.DataFrame(closes_dict)
 nifty_dates = raw_closes["NIFTYBEES.NS"].dropna().index
 closes      = raw_closes.loc[raw_closes.index.isin(nifty_dates)].ffill()
 
 print(f"\nCloses matrix: {closes.shape[0]} rows × {closes.shape[1]} columns")
 
-# ── 6. ALIGN SIGNALS + COMPUTE MOMENTUM ──────────────────────────────────────
-aligned  = signals_df.join(closes, how="inner", lsuffix="_sig", rsuffix="_px")
+# ── 6. ALIGN SIGNALS + MOMENTUM ──────────────────────────────────────────────
+aligned   = signals_df.join(closes, how="inner", lsuffix="_sig", rsuffix="_px")
 sigs_cols = [c for c in aligned.columns if c.endswith("_sig")]
 signals   = aligned[sigs_cols].rename(columns=lambda c: c.replace("_sig", ""))
 
@@ -212,12 +205,26 @@ today_sig  = signals.loc[today_date]
 uptrend    = today_sig[today_sig == 1.0].index.tolist()
 print(f"\nSignal date: {today_date.date()} | Uptrend ({len(uptrend)}): {uptrend}")
 
-current_top3 = []
+# Read existing holdings from trade log to compute hysteresis baseline
+existing_holdings = {}
 if os.path.exists(TRADE_LOG):
     tl = pd.read_csv(TRADE_LOG)
-    recent_buys = tl[tl["action"] == "BUY"].tail(10)
-    if not recent_buys.empty:
-        current_top3 = recent_buys["ticker"].unique().tolist()
+    if not tl.empty:
+        tl["quantity"] = pd.to_numeric(tl["quantity"], errors="coerce").fillna(0)
+        if "order_id" in tl.columns:
+            tl = tl.drop_duplicates(subset=["order_id"], keep="first")
+        for _, r in tl.iterrows():
+            t = r["ticker"]
+            existing_holdings.setdefault(t, 0.0)
+            if r["action"] == "BUY":
+                existing_holdings[t] += float(r["quantity"])
+            elif r["action"] == "SELL":
+                existing_holdings[t] -= float(r["quantity"])
+        existing_holdings = {k: v for k, v in existing_holdings.items()
+                             if v > 0.0001 and k != "LIQUIDBEES.NS"}
+
+current_top3 = list(existing_holdings.keys())
+print(f"Current holdings (from trade log): {existing_holdings if existing_holdings else 'EMPTY (fresh start)'}")
 
 valid_uptrend = [t for t in uptrend if t in mom_12w.columns]
 if valid_uptrend and today_date in mom_12w.index:
@@ -240,11 +247,13 @@ else:
 
 print(f"Target: { {k: f'{v*100:.0f}%' for k,v in target_alloc.items()} }")
 
-# ── 9. LIVE PRICES + SHARE QUANTITIES ────────────────────────────────────────
+# ── 9. LIVE PRICES + TARGET SHARE QUANTITIES ─────────────────────────────────
 live_prices   = {t: get_live_price_inr(t) for t in target_alloc}
 target_shares = {}
 
 for ticker, weight in target_alloc.items():
+    if ticker == "LIQUIDBEES.NS" and weight < 0.01:
+        continue
     p = live_prices.get(ticker)
     if not p or p <= 0:
         print(f"  [SKIP] {ticker}: no live price")
@@ -253,9 +262,33 @@ for ticker, weight in target_alloc.items():
     qty    = round(rupees / p, 5) if ticker == "BTC-USD" else math.floor(rupees / p)
     if qty > 0:
         target_shares[ticker] = qty
-        print(f"  {ticker}: {weight*100:.0f}% = ₹{rupees:,.0f} @ ₹{p:,.2f} = {qty}")
 
-# ── 10. PLACE ORDERS ─────────────────────────────────────────────────────────
+# ── 10. DELTA COMPUTATION (current → target) ─────────────────────────────────
+print("\nComputing delta trades (current → target)...")
+all_tickers = set(target_shares.keys()) | set(existing_holdings.keys())
+sells, buys = [], []
+
+for ticker in all_tickers:
+    target_qty  = target_shares.get(ticker, 0)
+    current_qty = existing_holdings.get(ticker, 0)
+    delta = target_qty - current_qty
+
+    if abs(delta) < 0.0001:
+        print(f"  HOLD  {ticker:<14} (have {current_qty}, target {target_qty})")
+        continue
+    if delta > 0:
+        buys.append((ticker, delta))
+        print(f"  BUY   {ticker:<14} {delta:.5f} (have {current_qty}, target {target_qty})")
+    else:
+        sells.append((ticker, abs(delta)))
+        print(f"  SELL  {ticker:<14} {abs(delta):.5f} (have {current_qty}, target {target_qty})")
+
+ordered_trades = sells + buys   # sells first to free margin
+
+if not ordered_trades:
+    print("\n  → No trades needed. Portfolio already at target.")
+
+# ── 11. PLACE ORDERS ──────────────────────────────────────────────────────────
 b_client = None
 if BINANCE_API and BINANCE_SECRET and MODE == "live":
     try:
@@ -278,34 +311,49 @@ def log_trade(ticker, action, qty, price, order_id):
         "mode"    : MODE,
     })
 
-print("\nPlacing orders...")
-for ticker, qty in target_shares.items():
-    p = live_prices.get(ticker, 0)
+if ordered_trades:
+    print("\nPlacing orders...")
 
+for ticker, qty in ordered_trades:
+    p = live_prices.get(ticker, 0)
+    action = "SELL" if (ticker, qty) in sells else "BUY"
+
+    # ── BTC via Binance ───────────────────────────────────────
     if ticker == "BTC-USD":
         if MODE == "sandbox":
-            oid = f"SIM-BNB-{datetime.utcnow().strftime('%H%M%S')}"
-            print(f"  [SANDBOX] BUY {qty:.5f} BTC @ ₹{p:,.0f}")
+            oid = f"SIM-BNB-{datetime.utcnow().strftime('%H%M%S')}-{action}"
+            print(f"  [SANDBOX] {action} {qty:.5f} BTC @ ₹{p:,.0f} → {oid}")
         elif b_client:
             try:
-                order = b_client.order_market_buy(symbol="BTCUSDT", quantity=qty)
-                oid   = str(order["orderId"])
-                print(f"  [LIVE] BUY {qty} BTC → {oid}")
+                if action == "BUY":
+                    order = b_client.order_market_buy(symbol="BTCUSDT", quantity=qty)
+                else:
+                    order = b_client.order_market_sell(symbol="BTCUSDT", quantity=qty)
+                oid = str(order["orderId"])
+                print(f"  [LIVE] {action} {qty} BTC → {oid}")
             except Exception as e:
-                print(f"  [ERROR] Binance: {e}"); oid = "FAILED"
+                print(f"  [ERROR] Binance {action}: {e}"); oid = "FAILED"
         else:
-            print("  [SKIP] BTC: no Binance credentials"); continue
-        log_trade(ticker, "BUY", qty, p, oid)
+            print(f"  [SKIP] BTC {action}: no Binance credentials"); continue
+        log_trade(ticker, action, qty, p, oid)
 
+    # ── ETFs via Upstox ───────────────────────────────────────
     else:
         inst = INSTRUMENT_MAP.get(ticker)
         if not inst:
             continue
         payload = {
-            "quantity": int(qty), "product": "D", "validity": "DAY",
-            "price": 0, "tag": "RAAM", "instrument_token": inst,
-            "order_type": "MARKET", "transaction_type": "BUY",
-            "disclosed_quantity": 0, "trigger_price": 0, "is_amo": True,
+            "quantity"        : int(qty),
+            "product"         : "D",
+            "validity"        : "DAY",
+            "price"           : 0,
+            "tag"             : "RAAM",
+            "instrument_token": inst,
+            "order_type"      : "MARKET",
+            "transaction_type": action,
+            "disclosed_quantity": 0,
+            "trigger_price"   : 0,
+            "is_amo"          : True,
         }
         resp = requests.post(
             f"{UPSTOX_ORDER_BASE}/v2/order/place",
@@ -313,13 +361,14 @@ for ticker, qty in target_shares.items():
         )
         if resp.ok:
             oid = resp.json().get("data", {}).get("order_id", "OK")
-            print(f"  [{'SANDBOX' if MODE=='sandbox' else 'LIVE'}] BUY {qty} {ticker} → {oid}")
+            tag = "SANDBOX" if MODE == "sandbox" else "LIVE"
+            print(f"  [{tag}] {action} {int(qty)} {ticker} → {oid}")
         else:
             oid = "FAILED"
             print(f"  [ERROR] {ticker}: {resp.text[:120]}")
-        log_trade(ticker, "BUY", qty, p, oid)
+        log_trade(ticker, action, int(qty), p, oid)
 
-# ── 11. UPDATE TRADE LOG ─────────────────────────────────────────────────────
+# ── 12. UPDATE TRADE LOG ─────────────────────────────────────────────────────
 os.makedirs("data/stage_3", exist_ok=True)
 if trade_records:
     df_new = pd.DataFrame(trade_records)
@@ -330,20 +379,23 @@ if trade_records:
     df_all.to_csv(TRADE_LOG, index=False)
     print(f"Trade log: {len(df_all)} total rows")
 
-# ── 12. P&L FROM TRADE LOG ───────────────────────────────────────────────────
+# ── 13. P&L FROM TRADE LOG ───────────────────────────────────────────────────
 holdings, cost_basis = {}, {}
 if os.path.exists(TRADE_LOG):
     tl = pd.read_csv(TRADE_LOG)
-    tl["quantity"] = pd.to_numeric(tl["quantity"], errors="coerce").fillna(0)
-    tl["price"]    = pd.to_numeric(tl["price"],    errors="coerce").fillna(0)
-    for _, r in tl.iterrows():
-        t = r["ticker"]; qty = float(r["quantity"]); px = float(r["price"])
-        holdings.setdefault(t, 0.0); cost_basis.setdefault(t, 0.0)
-        if r["action"] == "BUY":
-            holdings[t] += qty;  cost_basis[t] += qty * px
-        elif r["action"] == "SELL" and holdings[t] > 0:
-            avg = cost_basis[t] / holdings[t]
-            holdings[t] -= qty;  cost_basis[t] -= qty * avg
+    if not tl.empty:
+        tl["quantity"] = pd.to_numeric(tl["quantity"], errors="coerce").fillna(0)
+        tl["price"]    = pd.to_numeric(tl["price"],    errors="coerce").fillna(0)
+        if "order_id" in tl.columns:
+            tl = tl.drop_duplicates(subset=["order_id"], keep="first")
+        for _, r in tl.iterrows():
+            t = r["ticker"]; q = float(r["quantity"]); px = float(r["price"])
+            holdings.setdefault(t, 0.0); cost_basis.setdefault(t, 0.0)
+            if r["action"] == "BUY":
+                holdings[t] += q; cost_basis[t] += q * px
+            elif r["action"] == "SELL" and holdings[t] > 0:
+                avg = cost_basis[t] / holdings[t]
+                holdings[t] -= q; cost_basis[t] -= q * avg
 
 positions_list = []
 total_inv = total_cur = 0.0
@@ -365,7 +417,7 @@ for t, qty in holdings.items():
 net_pnl     = total_cur - total_inv
 net_pnl_pct = (net_pnl / total_inv * 100) if total_inv > 0 else 0.0
 
-# ── 13. WRITE DASHBOARD JSON ─────────────────────────────────────────────────
+# ── 14. WRITE DASHBOARD JSON ─────────────────────────────────────────────────
 dashboard = {
     "generated_at"   : datetime.utcnow().isoformat() + "Z",
     "mode"           : MODE,
@@ -387,5 +439,7 @@ with open(DASHBOARD_FILE, "w") as f:
     json.dump(dashboard, f, indent=2)
 
 print(f"\n{'='*65}")
-print(f"DONE | P&L ₹{net_pnl:+,.0f} ({net_pnl_pct:+.2f}%) | → {DASHBOARD_FILE}")
+print(f"DONE | P&L ₹{net_pnl:+,.0f} ({net_pnl_pct:+.2f}%) | "
+      f"Inv ₹{total_inv:,.0f} → Cur ₹{total_cur:,.0f}")
+print(f"Trades fired this run: {len(trade_records)}")
 print(f"{'='*65}")
