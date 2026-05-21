@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-05-21T06:47:07.592854Z",
+  "generated_at": "2026-05-21T10:26:31.292533Z",
   "mode": "sandbox",
   "portfolio_value": 60000.0,
   "total_invested": 58450.0,
-  "current_value": 59203.0,
-  "net_pnl": 754.0,
-  "net_pnl_pct": 1.29,
+  "current_value": 58987.0,
+  "net_pnl": 537.0,
+  "net_pnl_pct": 0.92,
   "breadth": 9,
   "breadth_max": 11,
   "target_alloc": {
@@ -29,26 +29,26 @@
       "ticker": "JUNIORBEES.NS",
       "shares": 26.0,
       "avg_cost": 758.99,
-      "live_price": 752.13,
+      "live_price": 748.15,
       "invested": 19734.0,
-      "current": 19555.0,
-      "pnl": -178.0,
-      "pnl_pct": -0.9
+      "current": 19452.0,
+      "pnl": -282.0,
+      "pnl_pct": -1.43
     },
     {
       "ticker": "CPSEETF.NS",
       "shares": 188.0,
       "avg_cost": 107.99,
-      "live_price": 105.2,
+      "live_price": 104.6,
       "invested": 20302.0,
-      "current": 19778.0,
-      "pnl": -524.0,
-      "pnl_pct": -2.58
+      "current": 19665.0,
+      "pnl": -637.0,
+      "pnl_pct": -3.14
     }
   ],
   "usd_inr": 95.82,
   "last_run_date": "2026-05-15",
   "signal_date": "2026-04-23",
-  "market_status": "LIVE",
-  "last_pnl_update": "2026-05-21 06:47 UTC"
+  "market_status": "CLOSED \u2014 last close shown",
+  "last_pnl_update": "2026-05-21 10:26 UTC"
 }
