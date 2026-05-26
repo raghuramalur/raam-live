@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-05-25T11:16:22.595267Z",
+  "generated_at": "2026-05-26T06:41:00.330907Z",
   "mode": "sandbox",
   "portfolio_value": 60000.0,
   "total_invested": 58764.0,
-  "current_value": 59675.0,
-  "net_pnl": 911.0,
-  "net_pnl_pct": 1.55,
+  "current_value": 59912.0,
+  "net_pnl": 1148.0,
+  "net_pnl_pct": 1.95,
   "breadth": 9,
   "breadth_max": 11,
   "target_alloc": {
@@ -19,36 +19,36 @@
       "ticker": "MON100.NS",
       "shares": 61.0,
       "avg_cost": 301.87,
-      "live_price": 332.13,
+      "live_price": 330.7,
       "invested": 18414.0,
-      "current": 20260.0,
-      "pnl": 1846.0,
-      "pnl_pct": 10.02
+      "current": 20173.0,
+      "pnl": 1759.0,
+      "pnl_pct": 9.55
     },
     {
       "ticker": "JUNIORBEES.NS",
       "shares": 26.0,
       "avg_cost": 758.99,
-      "live_price": 753.36,
+      "live_price": 764.8,
       "invested": 19734.0,
-      "current": 19587.0,
-      "pnl": -146.0,
-      "pnl_pct": -0.74
+      "current": 19885.0,
+      "pnl": 151.0,
+      "pnl_pct": 0.77
     },
     {
       "ticker": "CPSEETF.NS",
       "shares": 191.0,
       "avg_cost": 107.94,
-      "live_price": 103.81,
+      "live_price": 103.95,
       "invested": 20616.0,
-      "current": 19828.0,
-      "pnl": -788.0,
-      "pnl_pct": -3.82
+      "current": 19854.0,
+      "pnl": -761.0,
+      "pnl_pct": -3.69
     }
   ],
   "usd_inr": 96.24,
   "last_run_date": "2026-05-22",
   "signal_date": "2026-04-23",
-  "market_status": "CLOSED \u2014 last close shown",
-  "last_pnl_update": "2026-05-25 11:16 UTC"
+  "market_status": "LIVE",
+  "last_pnl_update": "2026-05-26 06:41 UTC"
 }
