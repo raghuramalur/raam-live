@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-27T06:58:30.719454Z",
+  "generated_at": "2026-05-27T10:56:48.737562Z",
   "mode": "sandbox",
   "portfolio_value": 60000.0,
   "total_invested": 58764.0,
@@ -49,6 +49,6 @@
   "usd_inr": 96.24,
   "last_run_date": "2026-05-22",
   "signal_date": "2026-04-23",
-  "market_status": "LIVE",
-  "last_pnl_update": "2026-05-27 06:58 UTC"
+  "market_status": "CLOSED \u2014 last close shown",
+  "last_pnl_update": "2026-05-27 10:56 UTC"
 }
