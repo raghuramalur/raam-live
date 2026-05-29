@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-05-29T10:35:38.980599Z",
+  "generated_at": "2026-05-29T12:49:51.367423Z",
   "mode": "sandbox",
   "portfolio_value": 60000.0,
-  "total_invested": 58764.0,
-  "current_value": 60068.0,
-  "net_pnl": 1304.0,
-  "net_pnl_pct": 2.22,
+  "total_invested": 58462.0,
+  "current_value": 59739.0,
+  "net_pnl": 1278.0,
+  "net_pnl_pct": 2.19,
   "breadth": 9,
   "breadth_max": 11,
   "target_alloc": {
@@ -17,12 +17,12 @@
   "positions": [
     {
       "ticker": "MON100.NS",
-      "shares": 61.0,
+      "shares": 60.0,
       "avg_cost": 301.87,
       "live_price": 328.74,
-      "invested": 18414.0,
-      "current": 20053.0,
-      "pnl": 1639.0,
+      "invested": 18112.0,
+      "current": 19724.0,
+      "pnl": 1612.0,
       "pnl_pct": 8.9
     },
     {
@@ -46,9 +46,7 @@
       "pnl_pct": -3.66
     }
   ],
-  "usd_inr": 96.24,
-  "last_run_date": "2026-05-22",
-  "signal_date": "2026-04-23",
-  "market_status": "CLOSED \u2014 last close shown",
-  "last_pnl_update": "2026-05-29 10:35 UTC"
+  "usd_inr": 95.78,
+  "last_run_date": "2026-05-29",
+  "signal_date": "2026-04-23"
 }
